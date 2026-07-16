@@ -1,0 +1,1 @@
+{{ check_not_null(ref('scd_dim_aircraft')) }}

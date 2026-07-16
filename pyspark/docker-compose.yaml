@@ -1,0 +1,262 @@
+# ============================================================
+# SPARK / ANALYTICS STACK — docker-compose.yaml
+# Tuned for: Windows 11 + WSL2, 10 cores / 14 threads, 16GB RAM
+# Pairs with hadoop-docker-compose.yaml on the same "bigdata" network.
+#
+# Resource limits below are LAPTOP-SIZED. Production-scale equivalents
+# are commented directly beneath each limit.
+# ============================================================
+
+services:
+  pyspark-notebook:
+    image: pyspark-notebook:1.3
+    container_name: jupyterlab
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+      - "4040-4045:4040-4045"
+    volumes:
+      - ../hadoop/hadoop-conf:/opt/hadoop/etc/hadoop:ro
+      - ./spark-conf:/usr/local/spark/conf:ro
+      - ./jupyter:/home/jovyan
+    environment:
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+      YARN_CONF_DIR: /opt/hadoop/etc/hadoop
+      SPARK_CONF_DIR: /usr/local/spark/conf
+      PYSPARK_SUBMIT_ARGS: >-
+        --master yarn
+        --deploy-mode client
+        pyspark-shell
+    networks:
+      - bigdata
+    mem_limit: 1g
+    mem_reservation: 512m
+    cpus: 0.5
+    # mem_limit: 8g
+    # mem_reservation: 4g
+    # cpus: 4
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z pyspark-notebook 8888"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  hdfs-init:
+    image: apache/hadoop:3.5.0
+    container_name: hdfs-init
+    restart: "no"
+    volumes:
+      - ../hadoop/hadoop-conf:/opt/hadoop/etc/hadoop:ro
+    environment:
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        until hdfs dfs -ls / >/dev/null 2>&1; do
+          echo "waiting for namenode..."
+          sleep 5
+        done
+        hdfs dfs -mkdir -p /user/jovyan/spark-history
+        hdfs dfs -chown -R jovyan:supergroup /user/jovyan
+        hdfs dfs -chmod -R 775 /user/jovyan
+
+        hdfs dfs -mkdir -p /user/hive/warehouse
+        hdfs dfs -chown -R jovyan:supergroup /user/hive
+        hdfs dfs -chmod -R 775 /user/hive
+    networks:
+      - bigdata
+
+  spark-history:
+    image: pyspark-notebook:1.3
+    container_name: historyServer
+    restart: unless-stopped
+    ports:
+      - "18080:18080"
+    volumes:
+      - ../hadoop/hadoop-conf:/opt/hadoop/etc/hadoop:ro
+      - ./spark-conf:/usr/local/spark/conf:ro
+    command: ['bash', '-lc', '/usr/local/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer']
+    depends_on:
+      hdfs-init:
+        condition: service_completed_successfully
+    environment:
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+      YARN_CONF_DIR: /opt/hadoop/etc/hadoop
+      SPARK_CONF_DIR: /usr/local/spark/conf
+      SPARK_HISTORY_OPTS: >-
+        -Dspark.history.fs.logDirectory=hdfs://namenode:9000/user/jovyan/spark-history
+        -Dspark.history.ui.port=18080
+    networks:
+      - bigdata
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 0.25
+    # mem_limit: 2g
+    # mem_reservation: 1g
+    # cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z spark-history 18080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+
+  # --- New: Hive Metastore backend ---
+  postgres:
+    image: postgres:17.5-bookworm
+    container_name: hive-metastore-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+#      TZ: Asia/Tehran
+#    command: ["postgres", "-c", "timezone=Asia/Tehran", "-c", "log_timezone=Asia/Tehran"]
+    volumes:
+      - metastore_db:/var/lib/postgresql/data
+    networks:
+      - bigdata
+    mem_limit: 256m
+    mem_reservation: 128m
+    cpus: 0.25
+    # mem_limit: 2g
+    # mem_reservation: 1g
+    # cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- New: Hive Metastore service (catalog only — not HiveServer2/MR) ---
+  hive-metastore:
+    image: apache/hive:4.0.2
+    container_name: hive-metastore
+    user: "1000"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HADOOP_USER_NAME: jovyan
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      SERVICE_OPTS: >-
+        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://hive-metastore-db:5432/metastore
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hive
+    ports:
+      - "9083:9083"
+    networks:
+      - bigdata
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 0.25
+    # mem_limit: 4g
+    # mem_reservation: 2g
+    # cpus: 2
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z hive-metastore 9083"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # --- New: Spark Thrift Server (JDBC/HiveServer2-compatible endpoint for dbt) ---
+  spark-thrift:
+    image: pyspark-notebook:1.3
+    container_name: spark-thrift
+    restart: unless-stopped
+    user: "1000"
+    ports:
+      - "10000:10000"
+      - "4046:4040"
+    volumes:
+      - ../hadoop/hadoop-conf:/opt/hadoop/etc/hadoop:ro
+      - ./spark-conf:/usr/local/spark/conf:ro
+    environment:
+      HADOOP_USER_NAME: jovyan
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+      YARN_CONF_DIR: /opt/hadoop/etc/hadoop
+      SPARK_CONF_DIR: /usr/local/spark/conf
+    command:
+      - bash
+      - -lc
+      - |
+        /usr/local/spark/bin/spark-submit \
+          --class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 \
+          --master yarn \
+          --deploy-mode client \
+          --name spark-thrift-server \
+          --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
+          --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
+          --conf spark.executor.memory=1g \
+          --conf spark.executor.cores=1 \
+          --conf spark.executor.instances=1 \
+          --conf spark.driver.memory=1g \
+          --conf spark.driver.cores=1 \
+          --conf spark.dynamicAllocation.enabled=false \
+          --conf spark.hadoop.hive.metastore.uris=thrift://hive-metastore:9083 \
+          --conf hive.server2.thrift.port=10000 \
+          --conf hive.server2.thrift.bind.host=0.0.0.0
+          # --conf spark.executor.instances=8   # production: more parallelism
+          # --conf spark.executor.memory=4g     # production
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+      hdfs-init:
+        condition: service_completed_successfully
+    networks:
+      - bigdata
+    # This container is just the driver process — actual executor memory/cores
+    # above are requested FROM the nodemanager pool, not from this limit.
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 0.25
+    # mem_limit: 4g
+    # mem_reservation: 2g
+    # cpus: 2
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z spark-thrift 10000"]
+      interval: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 90s
+
+  # --- New: dbt-core + dbt-spark ---
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-spark:1.9.latest
+    container_name: dbt
+    restart: unless-stopped
+    user: root
+    entrypoint: ["tail", "-f", "/dev/null"]
+    volumes:
+      - ./dbt-project:/usr/app/dbt
+      - ./dbt-profiles:/root/.dbt
+    environment:
+      DBT_PROFILES_DIR: /root/.dbt
+#    command: sleep infinity
+    depends_on:
+      spark-thrift:
+        condition: service_healthy
+    networks:
+      - bigdata
+    mem_limit: 256m
+    mem_reservation: 128m
+    cpus: 0.25
+    # mem_limit: 1g
+    # mem_reservation: 512m
+    # cpus: 1
+
+networks:
+  bigdata:
+    name: bigdata
+    driver: bridge
+    external: true
+
+volumes:
+  metastore_db:
+    name: bigdata_metastore_db

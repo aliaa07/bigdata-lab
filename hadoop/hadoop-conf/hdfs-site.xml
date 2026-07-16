@@ -1,0 +1,33 @@
+<configuration>
+  <property>
+    <name>dfs.replication</name>
+    <value>1</value>
+  </property>
+
+  <property>
+    <name>dfs.namenode.name.dir</name>
+	<value>file:///tmp/hadoop-hadoop/dfs/name</value>
+  </property>
+
+  <property>
+    <name>dfs.datanode.data.dir</name>
+	<value>file:///tmp/hadoop-hadoop/dfs/data</value>
+  </property>
+
+  <property>
+    <name>dfs.namenode.rpc-address</name>
+    <value>namenode:9000</value>
+  </property>
+
+  <property>
+    <name>dfs.namenode.http-address</name>
+    <value>namenode:9870</value>
+  </property>
+
+
+<!--  <property>-->
+<!--    <name>dfs.hosts.exclude</name>-->
+<!--    <value>/opt/hadoop/etc/hadoop/excludes</value>-->
+<!--  </property>-->
+
+</configuration>

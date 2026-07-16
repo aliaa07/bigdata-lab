@@ -1,0 +1,25 @@
+flight_data:
+  outputs:
+    dev:
+      host: spark-thrift
+      method: thrift
+      port: 10000
+      schema: warehouse
+      threads: 2
+      type: spark
+  target: dev
+
+spark_lab:
+  outputs:
+    dev:
+      connect_retries: 5
+      connect_timeout: 60
+      host: spark-thrift
+      method: thrift
+      port: 10000
+      retry_all: true
+      schema: warehouse
+      threads: 2
+      type: spark
+      user: jovyan
+  target: dev
