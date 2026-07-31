@@ -1,0 +1,199 @@
+version: 2
+
+models:
+  - name: stg_flight
+    description: "Staging model for raw flight data with cleaning and derived columns"
+    columns:
+      - name: flight_id
+        tests: [not_null]
+      - name: travel_date
+        tests: [not_null]
+      - name: passenger_key
+        tests: [not_null]
+      - name: flight_cost
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+
+  - name: fct_flight
+    description: "Fact table for flights - grain: one row per flight per passenger"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - flight_id
+            - travel_date
+            - passenger_key
+    columns:
+      - name: flight_key
+        tests: [unique, not_null]
+      - name: flight_id
+        tests: [not_null]
+      - name: travel_date
+        tests: [not_null]
+      - name: aircraft_id
+        tests: [not_null]
+      - name: origin_airport
+        tests: [not_null]
+      - name: destination_airport
+        tests: [not_null]
+      - name: revenue
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: distance
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: passenger_flight_class
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['economy', 'business', 'first']
+      - name: passenger_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_passenger')
+              field: passenger_key
+      - name: route_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_route')
+              field: route_key
+
+  - name: dim_route
+    description: "Route dimension (origin-destination pairs)"
+    columns:
+      - name: route_key
+        tests: [unique, not_null]
+      - name: origin_airport
+        tests: [not_null]
+      - name: destination_airport
+        tests: [not_null]
+
+  - name: fct_route_daily
+    description: "Daily route-level aggregates - grain: one row per route per day"
+    columns:
+      - name: route_date_key
+        tests: [unique, not_null]
+      - name: travel_date
+        tests: [not_null]
+      - name: route_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_route')
+              field: route_key
+      - name: flight_count
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: total_revenue
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: fct_aircraft_daily
+    description: "Daily aircraft utilization - grain: one row per aircraft per day"
+    columns:
+      - name: aircraft_date_key
+        tests: [unique, not_null]
+      - name: travel_date
+        tests: [not_null]
+      - name: aircraft_id
+        tests: [not_null]
+      - name: flight_count
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: total_revenue
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: fuel_per_km
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+
+  - name: dim_passenger_segment
+    description: "Passenger segmentation (VIP, frequent, regular, occasional)"
+    columns:
+      - name: passenger_segment_key
+        tests: [unique, not_null]
+      - name: passenger_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_passenger')
+              field: passenger_key
+      - name: segment
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['vip', 'frequent', 'regular', 'occasional']
+      - name: age_group
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['young_adult', 'adult', 'middle_aged', 'senior']
+
+snapshots:
+  - name: dim_passenger
+    description: "Passenger dimension with SCD2 history"
+    columns:
+      - name: passenger_key
+        tests: [unique, not_null]
+      - name: passenger_name
+        tests: [not_null]
+      - name: passenger_country
+        tests: [not_null]
+      - name: passenger_dob
+        tests: [not_null]
+      - name: frequent_flier
+        tests: [not_null]
+      - name: dbt_valid_from
+        tests: [not_null]
+      - name: dbt_valid_to
+        tests: []
+
+  - name: dim_aircraft
+    description: "Aircraft dimension with SCD2 history"
+    columns:
+      - name: aircraft_key
+        tests: [unique, not_null]
+      - name: aircraft_id
+        tests: [not_null]
+      - name: airplane_model
+        tests: [not_null]
+      - name: tail_no
+        tests: [not_null]
+
+  - name: dim_airport
+    description: "Airport dimension"
+    columns:
+      - name: airport_key
+        tests: [unique, not_null]
+      - name: airport_name
+        tests: [not_null, unique]
+
+sources:
+  - name: flight_data
+    database: warehouse
+    schema: warehouse
+    tables:
+      - name: flight_raw
+        description: "Raw bronze table from CSV ingestion"
+        columns:
+          - name: flight_id
+            tests: [not_null]
+          - name: travel_date
+            tests: [not_null]

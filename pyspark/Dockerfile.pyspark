@@ -1,0 +1,15 @@
+FROM jupyter/pyspark-notebook:x86_64-ubuntu-22.04
+
+RUN pip install delta-spark
+
+USER root
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends --no-install-suggests netcat-openbsd
+
+RUN curl -fL -o "${SPARK_HOME}/jars/delta-spark_2.12-3.2.0.jar" \
+      https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.0/delta-spark_2.12-3.2.0.jar \
+  && curl -fL -o "${SPARK_HOME}/jars/delta-storage-3.2.0.jar" \
+      https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.0/delta-storage-3.2.0.jar
+
+USER jovyan
