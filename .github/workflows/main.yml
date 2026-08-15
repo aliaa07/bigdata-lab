@@ -31,6 +31,12 @@ jobs:
       - name: Build custom images
         run: make build
 
+      - name: initialize hdfs
+        run: make init
+
+      - name: bigdata stack up
+        run: make up
+
       - name: Install dbt dependencies
         run: make dbt-deps
 
