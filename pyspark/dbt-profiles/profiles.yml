@@ -7,6 +7,8 @@ flight_data:
       schema: warehouse
       threads: 2
       type: spark
+      server_side_parameters:
+        "spark.databricks.delta.optimizeMetadataQuery.enabled": "false"
   target: dev
 
 spark_lab:
@@ -22,4 +24,6 @@ spark_lab:
       threads: 2
       type: spark
       user: jovyan
+      server_side_parameters:
+        "spark.databricks.delta.optimizeMetadataQuery.enabled": "false"
   target: dev

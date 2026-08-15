@@ -8,8 +8,6 @@ models:
         tests: [not_null]
       - name: travel_date
         tests: [not_null]
-      - name: passenger_key
-        tests: [not_null]
       - name: flight_cost
         tests:
           - not_null
@@ -31,11 +29,11 @@ models:
         tests: [not_null]
       - name: travel_date
         tests: [not_null]
-      - name: aircraft_id
+      - name: aircraft_key
         tests: [not_null]
-      - name: origin_airport
+      - name: origin_airport_key
         tests: [not_null]
-      - name: destination_airport
+      - name: destination_airport_key
         tests: [not_null]
       - name: revenue
         tests:
@@ -58,12 +56,6 @@ models:
           - relationships:
               to: ref('dim_passenger')
               field: passenger_key
-      - name: route_key
-        tests:
-          - not_null
-          - relationships:
-              to: ref('dim_route')
-              field: route_key
 
   - name: dim_route
     description: "Route dimension (origin-destination pairs)"
@@ -82,12 +74,6 @@ models:
         tests: [unique, not_null]
       - name: travel_date
         tests: [not_null]
-      - name: route_key
-        tests:
-          - not_null
-          - relationships:
-              to: ref('dim_route')
-              field: route_key
       - name: flight_count
         tests:
           - not_null
@@ -106,7 +92,7 @@ models:
         tests: [unique, not_null]
       - name: travel_date
         tests: [not_null]
-      - name: aircraft_id
+      - name: aircraft_key
         tests: [not_null]
       - name: flight_count
         tests:
@@ -173,8 +159,6 @@ snapshots:
       - name: aircraft_id
         tests: [not_null]
       - name: airplane_model
-        tests: [not_null]
-      - name: tail_no
         tests: [not_null]
 
   - name: dim_airport

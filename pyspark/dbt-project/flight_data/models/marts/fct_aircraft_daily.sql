@@ -1,4 +1,11 @@
-{{ config(materialized='incremental', file_format='delta', unique_key='aircraft_date_key') }}
+{{
+    config(
+        materialized='incremental',
+        file_format='delta',
+        unique_key='aircraft_date_key',
+        pre_hook="SET spark.databricks.delta.optimizeMetadataQuery.enabled = false"
+    )
+}}
 
 with flight_data as (
     select

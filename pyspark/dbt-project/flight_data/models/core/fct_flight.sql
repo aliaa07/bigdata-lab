@@ -5,13 +5,14 @@
         incremental_strategy='merge',
         file_format='delta',
         partition_by=['travel_date'],
-        cluster_by=['origin_airport', 'destination_airport', 'aircraft_id']
+        cluster_by=['origin_airport', 'destination_airport', 'aircraft_id'],
+        pre_hook="SET spark.databricks.delta.optimizeMetadataQuery.enabled = false"
     )
 }}
 
 with stg as (
     select * from {{ ref('stg_flight') }}
-),q
+),
 
 dim_passenger as (
     select * from {{ ref('dim_passenger') }}
@@ -40,7 +41,7 @@ fact as (
         dap_dest.airport_key as destination_airport_key,
 
         -- dates
-        s.travel_date,
+        cast(s.travel_date as date) as travel_date,
         year(s.travel_date) as travel_year,
         month(s.travel_date) as travel_month,
         dayofweek(s.travel_date) as travel_dow,
@@ -89,6 +90,7 @@ fact as (
 )
 
 select * from fact
+{{ log('is_incremental ' ~ var(is_incremental(), 'not incremental')) }}
 {% if is_incremental() %}
 where travel_date >= (select max(travel_date) from {{ this }})
 {% endif %}
