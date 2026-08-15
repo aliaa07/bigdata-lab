@@ -32,4 +32,4 @@ select
     passenger_flight_class,
     departure_seconds,
     uuid
-from {{ source('warehouse', 'stage_flight') }}
+from {{ ref('init_flight') }}

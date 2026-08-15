@@ -168,16 +168,3 @@ snapshots:
         tests: [unique, not_null]
       - name: airport_name
         tests: [not_null, unique]
-
-sources:
-  - name: flight_data
-    database: warehouse
-    schema: warehouse
-    tables:
-      - name: flight_raw
-        description: "Raw bronze table from CSV ingestion"
-        columns:
-          - name: flight_id
-            tests: [not_null]
-          - name: travel_date
-            tests: [not_null]

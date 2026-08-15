@@ -11,6 +11,8 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      COMPOSE_PROJECT_NAME: bigdata-ci
 
     # Hadoop + Spark need significant resources
     # GitHub hosted runners have 7GB RAM - may be tight
@@ -26,13 +28,8 @@ jobs:
       - name: Build custom images
         run: make build
 
-      - name: initialize hdfs
-        run: make init
-
       - name: Start Hadoop stack
-        run: make up
-        env:
-          COMPOSE_PROJECT_NAME: bigdata-ci
+        run: make ci-up
 
       - name: Install dbt dependencies
         run: make dbt-deps
@@ -43,8 +40,14 @@ jobs:
       - name: Run dbt snapshots
         run: make dbt-run-snapshots
 
-      - name: Run dbt models
-        run: make dbt-run
+      - name: Run dbt staging
+        run: make dbt-run-staging
+
+      - name: Run dbt core
+        run: make dbt-run-core
+
+      - name: Run dbt marts
+        run: dbt-run-marts
 
       - name: Run dbt tests
         run: make dbt-test
@@ -58,5 +61,3 @@ jobs:
       - name: Cleanup
         if: always()
         run: make down
-        env:
-          COMPOSE_PROJECT_NAME: bigdata-ci

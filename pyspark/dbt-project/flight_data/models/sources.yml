@@ -2,11 +2,14 @@ sources:
   - name: warehouse
     schema: warehouse
     tables:
-      - name: raw_flight
-        identifier: flight_raw
+      - name: sample_flight_data
+        identifier: sample_flight_data
 
-      - name: stage_flight_full
-        identifier: flight
-
-      - name: stage_flight
-        identifier: temp_flight
+#      - name: raw_flight
+#        identifier: flight_raw
+#
+#      - name: stage_flight_full
+#        identifier: flight
+#
+#      - name: stage_flight
+#        identifier: temp_flight

@@ -64,6 +64,11 @@ services:
         hdfs dfs -mkdir -p /user/hive/warehouse
         hdfs dfs -chown -R jovyan:supergroup /user/hive
         hdfs dfs -chmod -R 775 /user/hive
+        
+#        hdfs dfs -mkdir -p /user/spark
+#        hdfs dfs -put /opt/hadoop/etc/hadoop/spark-jars.zip /user/spark/
+#        hdfs dfs -chown -R jovyan:supergroup /user/spark
+#        hdfs dfs -chmod -R 775 /user/spark
     networks:
       - bigdata
 
@@ -163,7 +168,7 @@ services:
       interval: 20s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 120s
 
   # --- New: Spark Thrift Server (JDBC/HiveServer2-compatible endpoint for dbt) ---
   spark-thrift:
@@ -231,6 +236,7 @@ services:
     image: ghcr.io/dbt-labs/dbt-spark:1.9.latest
     container_name: dbt
     restart: unless-stopped
+    working_dir: /usr/app/dbt/flight_data
     user: root
     entrypoint: ["tail", "-f", "/dev/null"]
     ports:

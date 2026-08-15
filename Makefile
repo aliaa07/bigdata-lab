@@ -4,10 +4,10 @@
 # ============================================================
 
 .PHONY: help \
-	init up down build \
+	init up ci-up normal-up down build \
 	dbt-deps dbt-seed \
 	dbt-run dbt-run-staging dbt-run-core dbt-run-marts dbt-run-snapshots \
-	dbt-test dbt-docs dbt-clean \
+	dbt-test dbt-docs dbt-docs-generate dbt-clean \
 	all rebuild
 
 # ============================================================
@@ -26,7 +26,8 @@ help:
 	@echo ""
 	@echo "Docker:"
 	@echo "  build              - Build custom Docker images"
-	@echo "  up                 - Format/start Hadoop and start PySpark"
+	@echo "  init               - Initialize HDFS NameNode"
+	@echo "  up                 - Start Hadoop and PySpark"
 	@echo "  down               - Stop all Docker stacks"
 	@echo ""
 	@echo "dbt:"
@@ -38,6 +39,7 @@ help:
 	@echo "  dbt-run-marts      - Run marts models"
 	@echo "  dbt-run-snapshots  - Run dbt snapshots"
 	@echo "  dbt-test           - Run dbt tests"
+	@echo "  dbt-docs-generate  - Generate dbt documentation"
 	@echo "  dbt-docs           - Generate and serve dbt documentation"
 	@echo "  dbt-clean          - Clean dbt target directory"
 	@echo ""
@@ -45,12 +47,9 @@ help:
 	@echo "  all                - Full pipeline"
 	@echo "  rebuild            - Re-run dbt pipeline"
 
-
-
 # ============================================================
 # Docker image build
 # ============================================================
-
 build:
 	@echo "Building Hive image..."
 	cd $(PYSPARK_DIR) && docker build \
@@ -64,19 +63,40 @@ build:
 		-t pyspark-notebook:1.3 \
 		.
 
-
-
 # ============================================================
 # Docker orchestration
 # ============================================================
-init:
-	@echo "Initializing HDFS NameNode..."
+
+ci-up:
+	@echo "Initializing bigdata network..."
+	docker network create bigdata 2>/dev/null || true
+
+	@echo "Starting Hadoop..."
+	cd $(HADOOP_DIR) && docker compose up -d
+
+	@echo "Formatting HDFS NameNode..."
 	cd $(HADOOP_DIR) && docker compose run --rm namenode hdfs namenode -format -force
 
+	@echo "Waiting for HDFS NameNode to be healthy..."
+	@until (cd $(HADOOP_DIR) && docker compose exec -T namenode hdfs dfsadmin -report >/dev/null 2>&1); do \
+		echo "  ...still waiting on HDFS"; \
+		sleep 3; \
+	done
 	@echo "HDFS NameNode initialization completed."
 
-up:
-	docker network create bigdata 2>/dev/null || true
+	@echo "Starting PySpark..."
+	cd $(PYSPARK_DIR) && docker compose up -d
+
+	@echo "Waiting for Spark Thrift Server to accept connections..."
+	@until (cd $(PYSPARK_DIR) && docker compose exec -T spark-thrift bash -c "echo > /dev/tcp/localhost/10000" >/dev/null 2>&1); do \
+		echo "  ...still waiting on Thrift Server"; \
+		sleep 3; \
+	done
+
+	@echo "Big Data stack is ready."
+
+normal-up:
+	#docker network create bigdata 2>/dev/null || true
 
 	@echo "Starting Hadoop..."
 	cd $(HADOOP_DIR) && docker compose up -d
@@ -91,7 +111,7 @@ up:
 	cd $(PYSPARK_DIR) && docker compose up -d
 
 	@echo "Waiting for Spark Thrift Server to accept connections..."
-	@until (cd $(PYSPARK_DIR) && docker compose exec -T thriftserver bash -c "echo > /dev/tcp/localhost/10000" >/dev/null 2>&1); do \
+	@until (cd $(PYSPARK_DIR) && docker compose exec -T spark-thrift bash -c "echo > /dev/tcp/localhost/10000" >/dev/null 2>&1); do \
 		echo "  ...still waiting on Thrift Server"; \
 		sleep 3; \
 	done
@@ -100,58 +120,63 @@ up:
 
 down:
 	@echo "Stopping PySpark..."
-	cd $(PYSPARK_DIR) && docker compose down
+	cd $(PYSPARK_DIR) && docker compose down --remove-orphans
 
 	@echo "Stopping Hadoop..."
-	cd $(HADOOP_DIR) && docker compose down
-
+	cd $(HADOOP_DIR) && docker compose down --remove-orphans
 
 # ============================================================
 # dbt commands
 # ============================================================
 
 dbt-deps:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt deps
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt deps
 
 dbt-seed:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt seed
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt seed --select sample_flight_data
 
 dbt-run:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt run
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run
 
 dbt-run-staging:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt run --select staging
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run --select staging
 
 dbt-run-core:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt run --select core
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run --select core
 
 dbt-run-marts:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt run --select marts
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run --select marts
 
 dbt-run-snapshots:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt snapshot
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt snapshot
 
 dbt-test:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt test
-
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt test
 
 dbt-docs-generate:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt docs generate
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt docs generate
 
 dbt-docs:
-	cd $(PYSPARK_DIR) && docker compose run --rm \
-		-p 8080:8080 \
-		dbt \
+	cd $(PYSPARK_DIR) && docker compose exec -d dbt \
 		sh -c "dbt docs generate && dbt docs serve --port 8080 --host 0.0.0.0"
 
+	@echo "Waiting for dbt docs server..."
+	@until docker compose exec -T dbt sh -c \
+		"echo > /dev/tcp/localhost/8080" \
+		>/dev/null 2>&1; do \
+		sleep 1; \
+	done
+
+	@echo "dbt docs server is ready on port 8080"
+
 dbt-clean:
-	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt clean
+	cd $(PYSPARK_DIR) && docker compose exec dbt dbt clean
 
 # ============================================================
 # Full pipeline
 # ============================================================
 
-all: build up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
+all: build ci-up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
 	@echo ""
 	@echo "========================================="
 	@echo " Full Big Data pipeline completed"
@@ -161,7 +186,7 @@ all: build up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
 # Quick rebuild and test
 # ============================================================
 
-rebuild: build up dbt-clean dbt-deps dbt-seed dbt-run dbt-test
+rebuild: build init up dbt-clean dbt-deps dbt-seed dbt-run dbt-test
 	@echo ""
 	@echo "========================================="
 	@echo " Rebuild and test completed"

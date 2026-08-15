@@ -27,5 +27,9 @@ models:
       +materialized: incremental
       +incremental_strategy: merge
 
+seeds:
+  flight_data:
+    +file_format: delta
+
 vars:
   "dbt_date:time_zone": "UTC"
