@@ -69,7 +69,7 @@ dbt-clean:
 	cd pyspark && docker compose run --rm dbt dbt clean
 
 # Full pipeline
-all: up build dbt-deps dbt-seed dbt-run dbt-test
+all: up build dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-docs dbt-clean
 
 # Quick rebuild and test
 rebuild: dbt-clean dbt-deps dbt-seed dbt-run dbt-test
