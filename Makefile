@@ -134,6 +134,10 @@ dbt-run-snapshots:
 dbt-test:
 	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt test
 
+
+dbt-docs-generate:
+	cd $(PYSPARK_DIR) && docker compose run --rm dbt dbt docs generate
+
 dbt-docs:
 	cd $(PYSPARK_DIR) && docker compose run --rm \
 		-p 8080:8080 \

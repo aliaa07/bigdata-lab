@@ -23,19 +23,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Start Hadoop stack
-        run: make up
-        env:
-          COMPOSE_PROJECT_NAME: bigdata-ci
-
       - name: Build custom images
         run: make build
 
       - name: initialize hdfs
         run: make init
 
-      - name: bigdata stack up
+      - name: Start Hadoop stack
         run: make up
+        env:
+          COMPOSE_PROJECT_NAME: bigdata-ci
 
       - name: Install dbt dependencies
         run: make dbt-deps
@@ -52,8 +49,8 @@ jobs:
       - name: Run dbt tests
         run: make dbt-test
 
-      - name: Run dbt docs
-        run: make dbt-docs
+      - name: Generate dbt docs
+        run: make dbt-docs-generate
 
       - name: dbt cleanup
         run: make dbt-clean
@@ -61,3 +58,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: make down
+        env:
+          COMPOSE_PROJECT_NAME: bigdata-ci
