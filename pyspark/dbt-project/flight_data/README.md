@@ -2,7 +2,7 @@
 
 Spark SQL models for flight, route, aircraft and passenger analytics, using Delta Lake and Spark Thrift. The active profile is `flight_data`, target `dev`, schema `warehouse`.
 
-See the [repository README](../../../README.md) for a setup, service access, resource planning, and persistence. Review [the open findings](../../../PROJECT_REVIEW.md) before relying on metrics or incremental runs.
+See the [repository README](../../../README.md) for setup, service access, resource planning, and persistence. `make pipeline` runs the complete sample workflow using an already running stack; `make rebuild` starts the stack first and uses existing images.
 
 ## Input and dependency order
 
@@ -15,7 +15,11 @@ sample_flight_data -> init_flight -> stage_flight -> stg_flight
        -> fct_route_daily, fct_aircraft_daily, dim_passenger_segment
 ```
 
-`fct_flight` also joins all three snapshots. Staging is ephemeral; core/mart models use incremental Delta merges. `fct_flight` is partitioned by `travel_date`.
+`fct_flight` joins the current row from each snapshot using stable business keys. Staging and `int_flight_operation` are ephemeral; materialized core/mart models use Delta merges. `fct_flight` is partitioned by `travel_date` and keyed by flight/date/itinerary/ticket. Operational measures are reduced to one flight occurrence before daily aggregation; fares remain additive across tickets.
+
+Without an ingestion timestamp, every run scans the full source and recalculates aggregates. This includes late arrivals and historical corrections. Source deletions and changes to business keys require a full model refresh. Snapshot dates record when attributes were observed; facts do not perform travel-time SCD lookups. Passenger segments contain one row per passenger, using lifetime totals and current attributes.
+
+Fares retain two decimal places. Times use the travel date, adding a day when arrival time precedes departure time. The source lacks time-zone offsets and explicit arrival dates; durations assume a shared clock and flights shorter than 24 hours.
 
 ## Commands
 
@@ -43,6 +47,13 @@ Inside the container the working directory is `/usr/app/dbt/flight_data`; profil
 - `models/schema.yml`: descriptions and generic tests.
 - `models/sources.yml`: source configuration.
 - `packages.yml` / `package-lock.yml`: package declarations and resolutions.
-- `tests/`: placeholder; no custom SQL regression tests.
+- `tests/`: source-to-fact fare/duration reconciliation, lifetime-total reconciliation, and consistent flight-operation checks.
+- `../tests/test_pipeline.py`: live regression suite using a unique temporary schema.
 
-Current tests cover selected nullability, uniqueness, accepted values, numeric checks, and passenger relationships. They do not establish correct snapshot history, lifetime segmentation, late-data handling, or flight-level aggregation. Those issues, timestamp/currency casts, and route keys are documented in [PROJECT_REVIEW.md](../../../PROJECT_REVIEW.md).
+Generic tests cover nullability, uniqueness, accepted values, numeric checks, and passenger/route relationships. Snapshot keys are unique among current rows, while `dbt_scd_id` is unique across history. Run the regression suite after the main pipeline:
+
+```bash
+docker compose -f pyspark/docker-compose.yaml exec -T dbt python ../tests/test_pipeline.py
+```
+
+It verifies real Delta writes and merges with repeated passengers, shared flights, overnight times, cents, unchanged reruns, an old fare correction, a late arrival, and changed loyalty attributes. It cleans up its own temporary schema. `DBT_SCHEMA` overrides the default `warehouse` schema for isolated runs.

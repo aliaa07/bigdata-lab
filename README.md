@@ -2,7 +2,7 @@
 
 A local analytics lab built with Docker Compose, HDFS, YARN, Spark, Delta Lake, Hive Metastore, PostgreSQL, JupyterLab, and dbt. It explores flight, route, aircraft, and passenger analytics.
 
-**Status:** infrastructure, notebooks, models, snapshots, tests, and a CI workflow are implemented. The September 2026 review found startup and data correctness issues that remain open. See [PROJECT_REVIEW.md](PROJECT_REVIEW.md) before treating the metrics as reliable or the project as complete. End-to-end release validation is still required.
+**Status:** the Docker/YARN/dbt sample pipeline has been exercised locally with the existing images. Startup and data-correctness fixes and the live regression suite are described in [VALIDATION.md](VALIDATION.md). The historical notebooks are separate experiments and are not part of `make pipeline`.
 
 ## Architecture and data flow
 
@@ -10,7 +10,7 @@ Two Compose stacks communicate over the external Docker network `bigdata`:
 
 | Stack | Services | Responsibility |
 | --- | --- | --- |
-| [Hadoop](hadoop/docker-compose.yaml) | NameNode, DataNode, ResourceManager, four NodeManagers, ownership initialization jobs | HDFS storage and YARN scheduling |
+| [Hadoop](hadoop/docker-compose.yaml) | NameNode, DataNode, ResourceManager, two NodeManagers, ownership initialization jobs | HDFS storage and YARN scheduling |
 | [Analytics](pyspark/docker-compose.yaml) | JupyterLab, Spark History Server, Spark Thrift Server, Hive Metastore, PostgreSQL, dbt, HDFS initialization | Interactive processing, SQL execution, catalog, transformations |
 
 Spark drivers run in JupyterLab or the Thrift Server container; executors run on YARN. PostgreSQL stores Hive catalog metadata. Delta files and Spark event logs live in HDFS.
@@ -39,7 +39,7 @@ The three snapshots also feed `fct_flight`; passenger attributes feed `dim_passe
 - Internet access for initial image builds, Python packages, Maven artifacts, and `dbt deps`.
 - Available ports listed under [Service access](#service-access).
 
-The current configuration starts four NodeManagers with 3 GiB container limits each. Combined service memory limits total approximately **17 GiB**, excluding Docker, the host OS, and other workloads. Limits are ceilings rather than guaranteed usage, but the comments about a 12 GiB WSL allocation do not establish that the full stack fits. Review sizing before startup: Spark Thrift requests a 1 GiB driver heap inside a 512 MiB container.
+The local configuration uses two NodeManagers with 3 GiB limits each, a 2 GiB Thrift container with a 1 GiB driver heap, and a 1 GiB Hive Metastore container. Allocate about **12 GiB to Docker/WSL** and leave memory for the host. Container limits are ceilings, not reserved memory; avoid running other large workloads alongside the cluster. The default Thrift application requests one YARN executor.
 
 Dependencies run inside containers. The root `requirements.txt` is empty and is not a host installation procedure.
 
@@ -54,11 +54,19 @@ Dependencies run inside containers. The root `requirements.txt` is empty and is 
 | PostgreSQL | `postgres:17.5-bookworm` |
 | dbt | `ghcr.io/dbt-labs/dbt-spark:1.9.latest` |
 
-The PySpark Dockerfile uses an unpinned `pip install delta-spark`. The locally inspected image had Python PySpark 4.1.1 / Delta 4.2.0 alongside Spark 3.5.0 / Delta 3.2.0 JVM libraries. Resolve this mismatch before using notebooks or claiming reproducible builds. Delta 3.2.x supports Spark 3.5.x; see the [Delta compatibility matrix](https://docs.delta.io/releases/).
+The Dockerfile pins Python PySpark 3.5.0 and Delta 3.2.0. Compose explicitly selects the Python bindings bundled with Spark 3.5.0, which also repairs the PySpark import path in the previously built `1.3` image. Existing images may still contain a newer Python `delta` package: rebuild before using its Python SDK. The SQL pipeline uses the bundled Delta 3.2.0 JVM libraries. See the [Delta compatibility matrix](https://docs.delta.io/releases/).
 
 ## Setup and startup
 
-Run commands from the **repository root**. The following documents the intended manual workflow. Address the startup findings in [the review](PROJECT_REVIEW.md) before treating it as a verified clean-install guide.
+Run commands from the **repository root**. With the required images already present, the complete first-install workflow is:
+
+```bash
+make init       # only on new, empty storage, with Hadoop stopped
+make up
+make pipeline   # seed, snapshots, models, tests, and documentation
+```
+
+On subsequent runs use `make rebuild`: it starts services and reruns the pipeline without building images or formatting storage. The sections below explain each step.
 
 ### 1. Validate configuration and build
 
@@ -135,7 +143,7 @@ The service entrypoint is `tail -f /dev/null`, so plain `docker compose run dbt 
 docker compose -f pyspark/docker-compose.yaml run --rm --no-deps --entrypoint dbt dbt debug
 ```
 
-After source changes, run snapshots, models, and tests again. Current incremental logic has known errors around late data, snapshot history, and passenger totals; consult the review before relying on repeated runs. `dbt run --full-refresh` rebuilds incremental models and does not reset snapshot history.
+After source changes, run snapshots, models, and tests again. Without an ingestion timestamp, models merge the full available source and recalculate lifetime/daily aggregates, so late records and corrections to old dates are included. This favors correctness for the small lab dataset over incremental scan performance. Source deletions or changes to business keys require `dbt run --full-refresh`; snapshots retain their history. Running `make pipeline` reseeds from the CSV, so edit that file if you want source changes to survive reseeding.
 
 ### Model inventory
 
@@ -146,7 +154,8 @@ After source changes, run snapshots, models, and tests again. Current incrementa
 | `dim_aircraft` | SCD2 snapshot | Aircraft identity/model history |
 | `dim_passenger` | SCD2 snapshot | Passenger identity/loyalty history |
 | `dim_route` | Incremental Delta merge | Origin/destination pair |
-| `fct_flight` | Incremental Delta merge; travel-date partitions | Passenger flight/ticket record; key hashes flight ID, itinerary, ticket |
+| `fct_flight` | Incremental Delta merge; travel-date partitions | Passenger ticket; key hashes flight ID, travel date, itinerary, ticket |
+| `int_flight_operation` | Ephemeral | One flight/date occurrence; deduplicates operational measures across tickets |
 | `fct_route_daily` | Incremental Delta merge | Route/day aggregates |
 | `fct_aircraft_daily` | Incremental Delta merge | Aircraft/day aggregates |
 | `dim_passenger_segment` | Incremental Delta merge | Passenger spend, frequency, segment |
@@ -210,7 +219,7 @@ docker compose -f pyspark/docker-compose.yaml exec -T dbt dbt docs generate
 docker compose -f pyspark/docker-compose.yaml exec -T dbt dbt docs serve --port 8080 --host 0.0.0.0
 ```
 
-The `make dbt-docs` readiness loop has a Compose working-directory error; use the explicit commands above until it is repaired.
+Alternatively, `make dbt-docs` generates documentation, starts the server in the background, and waits for an HTTP response.
 
 This is a local lab configuration: PostgreSQL uses development credentials `hive` / `hive`, Hadoop proxy-user access is broad, and published ports are not restricted to loopback. Review exposure and authentication before making the services accessible outside a trusted development machine.
 
@@ -228,27 +237,36 @@ make dbt-docs-generate
 make down
 ```
 
-Current limitations:
+Target behavior:
 
-- `make init` initializes empty storage; `make up` / `make normal-up` create the network if needed and start an already initialized installation. Readiness loops still have no timeout.
-- `make all` assumes HDFS has already been initialized. `make rebuild` still omits snapshots. Neither is a verified full pipeline while the remaining review findings are open.
-- Pipeline steps are prerequisites, not a serial dependency chain; do not use `make -j` for them.
+- `make init` initializes empty storage; `make up` / `make normal-up` create the network if needed and start an already initialized installation. Compose readiness has a five-minute timeout.
+- `make all` builds images, starts services, and runs the pipeline. It assumes HDFS has already been initialized.
+- `make rebuild` starts services and runs `make pipeline`, using existing images. `make pipeline` runs dependencies, seed, snapshots, models, tests, and docs in order. Both preserve generated artifacts.
+- Composite targets invoke each child Make sequentially, including under `make -j`; avoid launching separate pipeline commands concurrently.
 - `make dbt-clean` removes `target` and `dbt_packages`, including generated docs and validation artifacts. Run `dbt deps` again afterward.
 
-[GitHub Actions](.github/workflows/main.yml) runs on pushes and pull requests to `main`. It checks startup safeguards, builds images, initializes isolated storage before starting services, runs dbt steps, generates docs, and tears down. Its marts step still invokes `dbt-run-marts` without `make`, and resource/dependency issues remain. Test logs and docs are not uploaded as artifacts.
+[GitHub Actions](.github/workflows/main.yml) runs on pushes and pull requests to `main`. It checks startup safeguards, builds images, initializes isolated storage, runs dbt steps, generates docs, and tears down. The local Docker run does not validate a hosted Actions runner; size runner memory for the stack. Test logs and docs are not uploaded as CI artifacts.
 
 ## Validation and troubleshooting
 
-[models/schema.yml](pyspark/dbt-project/flight_data/models/schema.yml) contains selected nullability, uniqueness, accepted class/segment values, positive distance/fuel-ratio checks, nonnegative revenue checks, and passenger relationships. `tests/` has no custom SQL tests. Model contracts are not enforced and dimension relationship coverage is incomplete.
+[models/schema.yml](pyspark/dbt-project/flight_data/models/schema.yml) checks nullability, uniqueness, accepted values, numeric bounds, passenger relationships, and route relationships. Snapshot business keys must be unique among current rows; `dbt_scd_id` must be unique across history. Custom SQL tests reconcile fares/durations and lifetime totals and reject conflicting operational measures across tickets.
 
-The September 2026 review validated both Compose definitions, parsed Hadoop XML, Python utilities, and ordinary Python notebook cells, and ran isolated Spark 3.5 SELECT-level checks. Those checks exposed incorrect durations, rounded monetary amounts, unmatched route keys, and a repeat-run segmentation failure. They did **not** validate actual dbt materializations, Delta merges, a live YARN deployment, or the full CI pipeline. See [PROJECT_REVIEW.md](PROJECT_REVIEW.md) for evidence and proposed regression cases.
+Run the live regression suite after the main pipeline:
+
+```bash
+docker compose -f pyspark/docker-compose.yaml exec -T dbt python ../tests/test_pipeline.py
+```
+
+It creates a unique temporary schema, runs real snapshots and Delta merges, and checks unchanged reruns, shared-flight aggregation, late arrivals, historical fare corrections, and loyalty history. It removes only its own schema afterward. Main warehouse data is untouched.
+
+Flight times are treated as a shared clock, with arrival on the next day when its time precedes departure. The source provides no time-zone offsets or arrival date, so flights over 24 hours and cross-zone elapsed times cannot be inferred. Facts use stable dimension business keys and current dimension attributes; snapshots record observation history, not travel-time history.
 
 | Symptom | Check |
 | --- | --- |
 | `make: getcwd` or Compose path becomes `/hadoop/...` | Reset the WSL working directory with `cd /`, then run `make -C /mnt/c/Users/asus/Docker/bigdata up` for this checkout; use your own absolute checkout path elsewhere |
 | External network missing | Inspect or create `bigdata` |
 | NameNode failure or DataNode cluster ID mismatch | Inspect logs and volume history; do not reformat existing data |
-| Thrift restarts or is killed | Check logs and its 512 MiB limit versus the 1 GiB driver heap |
+| Thrift restarts or is killed | Check Docker/WSL memory and YARN executor logs; the driver has a 1 GiB heap inside a 2 GiB container |
 | Notebook import/JVM errors | Compare Python PySpark/Delta versions with the JVM libraries |
 | dbt cannot connect | Check Thrift health, YARN nodes, and `dbt debug` |
 | dbt tables missing | Run seed and snapshots in order; verify `warehouse` and the profile |
@@ -329,6 +347,6 @@ Notebooks, dbt source, installed dbt packages, and generated dbt outputs are hos
 └── README.md
 ```
 
-## Remaining wrap-up work
+## Scope and remaining work
 
-Complete the prioritized modifications in [PROJECT_REVIEW.md](PROJECT_REVIEW.md), then validate a clean install and a second pipeline run, retain results, and update this status. Dataset provenance, currency/units, and a repository license remain undocumented.
+The repeatable sample workflow is `make pipeline`. The separate notebook workflows and utility defects recorded in [PROJECT_REVIEW.md](PROJECT_REVIEW.md) remain outside that workflow. Hosted GitHub Actions and rebuilt images require their own validation. Dataset provenance, currency/units, and a repository license still need project-owner input.

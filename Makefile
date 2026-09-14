@@ -8,7 +8,7 @@
 	dbt-deps dbt-seed \
 	dbt-run dbt-run-staging dbt-run-core dbt-run-marts dbt-run-snapshots \
 	dbt-test dbt-docs dbt-docs-generate dbt-clean \
-	all rebuild
+	pipeline all rebuild
 
 # ============================================================
 # Project directories
@@ -44,8 +44,9 @@ help:
 	@echo "  dbt-clean          - Clean dbt target directory"
 	@echo ""
 	@echo "Pipeline:"
-	@echo "  all                - Full pipeline"
-	@echo "  rebuild            - Re-run dbt pipeline"
+	@echo "  pipeline           - Run seed, snapshots, models, tests and docs (no image build)"
+	@echo "  all                - Build images, start services, run pipeline"
+	@echo "  rebuild            - Re-run pipeline using existing images"
 
 # ============================================================
 # Docker image build
@@ -92,19 +93,21 @@ normal-up: up
 up: network
 
 	@echo "Starting Hadoop..."
-	cd $(HADOOP_DIR) && docker compose up -d
+	cd $(HADOOP_DIR) && docker compose up -d --wait --wait-timeout 300
 
 	@echo "Waiting for HDFS NameNode to be healthy..."
-	@until (cd $(HADOOP_DIR) && docker compose exec -T namenode hdfs dfsadmin -report >/dev/null 2>&1); do \
+	@attempt=0; until (cd $(HADOOP_DIR) && docker compose exec -T namenode hdfs dfsadmin -report >/dev/null 2>&1); do \
+		attempt=$$((attempt + 1)); [ $$attempt -lt 60 ] || { echo "HDFS readiness timed out" >&2; exit 1; }; \
 		echo "  ...still waiting on HDFS"; \
 		sleep 3; \
 	done
 
 	@echo "Starting PySpark..."
-	cd $(PYSPARK_DIR) && docker compose up -d
+	cd $(PYSPARK_DIR) && docker compose up -d --wait --wait-timeout 300
 
 	@echo "Waiting for Spark Thrift Server to accept connections..."
-	@until (cd $(PYSPARK_DIR) && docker compose exec -T spark-thrift bash -c "echo > /dev/tcp/localhost/10000" >/dev/null 2>&1); do \
+	@attempt=0; until (cd $(PYSPARK_DIR) && docker compose exec -T spark-thrift bash -c "echo > /dev/tcp/localhost/10000" >/dev/null 2>&1); do \
+		attempt=$$((attempt + 1)); [ $$attempt -lt 60 ] || { echo "Thrift readiness timed out" >&2; exit 1; }; \
 		echo "  ...still waiting on Thrift Server"; \
 		sleep 3; \
 	done
@@ -123,53 +126,66 @@ down:
 # ============================================================
 
 dbt-deps:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt deps
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt deps
 
 dbt-seed:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt seed --select sample_flight_data
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt seed --select sample_flight_data
 
 dbt-run:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt run
 
 dbt-run-staging:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run --select staging
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt run --select staging
 
 dbt-run-core:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run --select core
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt run --select core
 
 dbt-run-marts:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt run --select marts
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt run --select marts
 
 dbt-run-snapshots:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt snapshot
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt snapshot
 
 dbt-test:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt test
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt test
 
 dbt-docs-generate:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt docs generate
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt docs generate
 
 dbt-docs:
-	cd $(PYSPARK_DIR) && docker compose exec -d dbt \
-		sh -c "dbt docs generate && dbt docs serve --port 8080 --host 0.0.0.0"
+	$(MAKE) -C "$(CURDIR)" dbt-docs-generate
+	cd $(PYSPARK_DIR) && docker compose exec -d dbt sh -c \
+		"dbt docs serve --port 8080 --host 0.0.0.0 > /tmp/dbt-docs.log 2>&1"
 
 	@echo "Waiting for dbt docs server..."
-	@until docker compose exec -T dbt sh -c \
-		"echo > /dev/tcp/localhost/8080" \
-		>/dev/null 2>&1; do \
+	@attempt=0; until (cd $(PYSPARK_DIR) && docker compose exec -T dbt python -c \
+		"import urllib.request; urllib.request.urlopen('http://localhost:8080', timeout=2)" \
+		>/dev/null 2>&1); do \
+		attempt=$$((attempt + 1)); [ $$attempt -lt 60 ] || { echo "dbt docs readiness timed out" >&2; exit 1; }; \
 		sleep 1; \
 	done
 
 	@echo "dbt docs server is ready on port 8080"
 
 dbt-clean:
-	cd $(PYSPARK_DIR) && docker compose exec dbt dbt clean
+	cd $(PYSPARK_DIR) && docker compose exec -T dbt dbt clean
 
 # ============================================================
 # Full pipeline
 # ============================================================
 
-all: build up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
+pipeline:
+	$(MAKE) -C "$(CURDIR)" dbt-deps
+	$(MAKE) -C "$(CURDIR)" dbt-seed
+	$(MAKE) -C "$(CURDIR)" dbt-run-snapshots
+	$(MAKE) -C "$(CURDIR)" dbt-run
+	$(MAKE) -C "$(CURDIR)" dbt-test
+	$(MAKE) -C "$(CURDIR)" dbt-docs-generate
+
+all:
+	$(MAKE) -C "$(CURDIR)" build
+	$(MAKE) -C "$(CURDIR)" up
+	$(MAKE) -C "$(CURDIR)" pipeline
 	@echo ""
 	@echo "========================================="
 	@echo " Full Big Data pipeline completed"
@@ -179,7 +195,9 @@ all: build up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
 # Quick rebuild and test
 # ============================================================
 
-rebuild: build up dbt-clean dbt-deps dbt-seed dbt-run dbt-test
+rebuild:
+	$(MAKE) -C "$(CURDIR)" up
+	$(MAKE) -C "$(CURDIR)" pipeline
 	@echo ""
 	@echo "========================================="
 	@echo " Rebuild and test completed"

@@ -18,7 +18,7 @@ staged as (
         cast(aircraft_id as string)               as aircraft_id,
         cast(itinerary_no as int)                 as itinerary_no,
         cast(ticket_no as string)                 as ticket_no,
-        cast(flight_cost as decimal(10,0))        as flight_cost,
+        cast(flight_cost as decimal(12,2))        as flight_cost,
         cast(origin_airport as string)            as origin_airport,
         cast(destination_airport as string)       as destination_airport,
         cast(frequent_flier as boolean)           as frequent_flier,
@@ -29,7 +29,9 @@ staged as (
             + minute(to_timestamp(departure_time, 'HH:mm:ss')) * 60
             + second(to_timestamp(departure_time, 'HH:mm:ss'))            as departure_seconds,
 
-        cast(arrival_time as timestamp)           as arrival_time,
+        to_timestamp(concat(travel_date, ' ', arrival_time), 'yyyy-MM-dd HH:mm:ss')
+            + case when arrival_time < departure_time then interval 1 day else interval 0 days end
+                                                   as arrival_time,
         cast(airplane_model as string)            as airplane_model,
         cast(frequent_flier_no as string)         as frequent_flier_no,
         cast(passenger_name as string)            as passenger_name,

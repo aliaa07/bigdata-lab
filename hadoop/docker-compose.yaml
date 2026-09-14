@@ -201,7 +201,7 @@ services:
     # mem_limit: 16g
     # cpus: 6
     deploy:
-      replicas: 4
+      replicas: 2
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f NodeManager || exit 1"]
       interval: 30s

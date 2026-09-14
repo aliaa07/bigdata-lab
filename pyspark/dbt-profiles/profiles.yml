@@ -4,7 +4,7 @@ flight_data:
       host: spark-thrift
       method: thrift
       port: 10000
-      schema: warehouse
+      schema: "{{ env_var('DBT_SCHEMA', 'warehouse') }}"
       threads: 2
       type: spark
       server_side_parameters:

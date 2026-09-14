@@ -19,8 +19,8 @@ with flight_data as (
         f.turbulance,
         f.taxi_duration_mins,
         f.flight_duration_mins,
-        f.passenger_flight_class
-    from {{ ref('fct_flight') }} f
+        f.premium_flight
+    from {{ ref('int_flight_operation') }} f
 ),
 
 aircraft_daily as (
@@ -41,7 +41,7 @@ aircraft_daily as (
         sum(case when turbulance > 5 then 1 else 0 end) as high_turbulance_flights,
         avg(taxi_duration_mins) as avg_taxi_duration,
         avg(flight_duration_mins) as avg_flight_duration,
-        sum(case when passenger_flight_class in ('business', 'first') then 1 else 0 end) as premium_flights
+        sum(premium_flight) as premium_flights
     from flight_data
     group by 1, 2
 )
@@ -66,6 +66,3 @@ select
     avg_flight_duration,
     premium_flights
 from aircraft_daily
-{% if is_incremental() %}
-where travel_date >= (select max(travel_date) from {{ this }})
-{% endif %}

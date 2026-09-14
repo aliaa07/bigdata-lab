@@ -1,6 +1,6 @@
 sources:
   - name: warehouse
-    schema: warehouse
+    schema: "{{ target.schema }}"
     tables:
       - name: sample_flight_data
         identifier: sample_flight_data

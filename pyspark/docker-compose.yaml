@@ -23,6 +23,8 @@ services:
       HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
       YARN_CONF_DIR: /opt/hadoop/etc/hadoop
       SPARK_CONF_DIR: /usr/local/spark/conf
+      # Use Python bindings shipped with this image's Spark 3.5 JVM.
+      PYTHONPATH: /usr/local/spark/python:/usr/local/spark/python/lib/py4j-0.10.9.7-src.zip
       PYSPARK_SUBMIT_ARGS: >-
         --master yarn
         --deploy-mode client
@@ -157,9 +159,9 @@ services:
       - "9083:9083"
     networks:
       - bigdata
-    mem_limit: 512m
-    mem_reservation: 256m
-    cpus: 0.25
+    mem_limit: 1g
+    mem_reservation: 512m
+    cpus: 0.5
     # mem_limit: 4g
     # mem_reservation: 2g
     # cpus: 2
@@ -218,9 +220,9 @@ services:
       - bigdata
     # This container is just the driver process — actual executor memory/cores
     # above are requested FROM the nodemanager pool, not from this limit.
-    mem_limit: 512m
-    mem_reservation: 256m
-    cpus: 0.25
+    mem_limit: 2g
+    mem_reservation: 1g
+    cpus: 1
     # mem_limit: 4g
     # mem_reservation: 2g
     # cpus: 2
@@ -251,9 +253,9 @@ services:
         condition: service_healthy
     networks:
       - bigdata
-    mem_limit: 256m
-    mem_reservation: 128m
-    cpus: 0.25
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 0.5
     # mem_limit: 1g
     # mem_reservation: 512m
     # cpus: 1

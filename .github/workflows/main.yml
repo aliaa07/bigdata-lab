@@ -51,10 +51,13 @@ jobs:
         run: make dbt-run-core
 
       - name: Run dbt marts
-        run: dbt-run-marts
+        run: make dbt-run-marts
 
       - name: Run dbt tests
         run: make dbt-test
+
+      - name: Check pipeline reruns and corrections
+        run: docker compose -f pyspark/docker-compose.yaml exec -T dbt python ../tests/test_pipeline.py
 
       - name: Generate dbt docs
         run: make dbt-docs-generate

@@ -10,6 +10,7 @@
 with daily_flight as (
     select
         f.flight_id,
+        f.route_key,
         f.travel_date,
         f.origin_airport_key,
         f.destination_airport_key,
@@ -22,9 +23,11 @@ with daily_flight as (
         f.turbulance,
         f.temp_at_dept,
         f.taxi_duration_mins,
-        f.passenger_flight_class,
-        f.frequent_flier
-    from {{ ref('fct_flight') }} f
+        f.ticket_count,
+        f.business_class_flight,
+        f.first_class_flight,
+        f.frequent_flier_count
+    from {{ ref('int_flight_operation') }} f
 ),
 
 route_daily as (
@@ -32,10 +35,10 @@ route_daily as (
         travel_date,
         origin_airport_key,
         destination_airport_key,
-        concat(origin_airport_key, '-', destination_airport_key) as route_key,
-        count(distinct flight_id) as flight_count,
+        route_key,
+        count(*) as flight_count,
         sum(distance) as total_distance_km,
-        avg(flight_cost) as avg_flight_cost,
+        sum(flight_cost) / sum(ticket_count) as avg_flight_cost,
         sum(flight_cost) as total_revenue,
         avg(fuel_consumed_litre) as avg_fuel_consumption,
         sum(fuel_consumed_litre) as total_fuel_consumption,
@@ -44,9 +47,9 @@ route_daily as (
         avg(turbulance) as avg_turbulance,
         avg(temp_at_dept) as avg_temp_at_dept,
         avg(taxi_duration_mins) as avg_taxi_duration,
-        sum(case when passenger_flight_class = 'business' then 1 else 0 end) as business_class_flights,
-        sum(case when passenger_flight_class = 'first' then 1 else 0 end) as first_class_flights,
-        sum(case when frequent_flier then 1 else 0 end) as frequent_flier_count
+        sum(business_class_flight) as business_class_flights,
+        sum(first_class_flight) as first_class_flights,
+        sum(frequent_flier_count) as frequent_flier_count
     from daily_flight
     group by 1, 2, 3, 4
 )
@@ -72,6 +75,3 @@ select
     first_class_flights,
     frequent_flier_count
 from route_daily
-{% if is_incremental() %}
-where travel_date >= (select max(travel_date) from {{ this }})
-{% endif %}

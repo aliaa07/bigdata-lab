@@ -1,6 +1,6 @@
 FROM jupyter/pyspark-notebook:x86_64-ubuntu-22.04
 
-RUN pip install delta-spark
+RUN pip install pyspark==3.5.0 delta-spark==3.2.0
 
 USER root
 

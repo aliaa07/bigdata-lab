@@ -19,9 +19,6 @@ with passenger_stats as (
         max(f.travel_date) as last_flight_date,
         datediff(max(f.travel_date), min(f.travel_date)) as customer_lifetime_days
     from {{ ref('fct_flight') }} f
-    {% if is_incremental() %}
-    where f.travel_date >= (select coalesce(max(last_flight_date), date('1900-01-01')) from {{ this }})
-    {% endif %}
     group by f.passenger_key
 ),
 
@@ -33,6 +30,7 @@ passenger_attrs as (
         dp.frequent_flier,
         dp.frequent_flier_no
     from {{ ref('dim_passenger') }} dp
+    where dp.dbt_valid_to is null
 ),
 
 segments as (
@@ -60,7 +58,7 @@ segments as (
 )
 
 select
-    {{ dbt_utils.generate_surrogate_key(['passenger_key', 'segment']) }} as passenger_segment_key,
+    {{ dbt_utils.generate_surrogate_key(['passenger_key']) }} as passenger_segment_key,
     passenger_key,
     passenger_country,
     passenger_dob,

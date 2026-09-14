@@ -2,7 +2,7 @@
 
 {{
     config(
-        target_schema='warehouse',
+        target_schema=target.schema,
         unique_key='airport_key',
         strategy='check',
         file_format='delta',

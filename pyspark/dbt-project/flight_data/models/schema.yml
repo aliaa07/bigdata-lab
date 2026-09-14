@@ -15,13 +15,14 @@ models:
               expression: "> 0"
 
   - name: fct_flight
-    description: "Fact table for flights - grain: one row per flight per passenger"
+    description: "Passenger ticket fact: one row per flight/date/itinerary/ticket; dimension keys use current snapshot attributes."
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
             - flight_id
             - travel_date
-            - passenger_key
+            - itinerary_no
+            - ticket_no
     columns:
       - name: flight_key
         tests: [unique, not_null]
@@ -70,6 +71,12 @@ models:
   - name: fct_route_daily
     description: "Daily route-level aggregates - grain: one row per route per day"
     columns:
+      - name: route_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_route')
+              field: route_key
       - name: route_date_key
         tests: [unique, not_null]
       - name: travel_date
@@ -136,8 +143,14 @@ snapshots:
   - name: dim_passenger
     description: "Passenger dimension with SCD2 history"
     columns:
-      - name: passenger_key
+      - name: dbt_scd_id
         tests: [unique, not_null]
+      - name: passenger_key
+        tests:
+          - not_null
+          - unique:
+              config:
+                where: "dbt_valid_to is null"
       - name: passenger_name
         tests: [not_null]
       - name: passenger_country
@@ -154,8 +167,14 @@ snapshots:
   - name: dim_aircraft
     description: "Aircraft dimension with SCD2 history"
     columns:
-      - name: aircraft_key
+      - name: dbt_scd_id
         tests: [unique, not_null]
+      - name: aircraft_key
+        tests:
+          - not_null
+          - unique:
+              config:
+                where: "dbt_valid_to is null"
       - name: aircraft_id
         tests: [not_null]
       - name: airplane_model
@@ -164,7 +183,13 @@ snapshots:
   - name: dim_airport
     description: "Airport dimension"
     columns:
-      - name: airport_key
+      - name: dbt_scd_id
         tests: [unique, not_null]
+      - name: airport_key
+        tests:
+          - not_null
+          - unique:
+              config:
+                where: "dbt_valid_to is null"
       - name: airport_name
-        tests: [not_null, unique]
+        tests: [not_null]

@@ -5,7 +5,6 @@
         incremental_strategy='merge',
         file_format='delta',
         partition_by=['travel_date'],
-        cluster_by=['origin_airport', 'destination_airport', 'aircraft_id'],
         pre_hook="SET spark.databricks.delta.optimizeMetadataQuery.enabled = false"
     )
 }}
@@ -15,27 +14,29 @@ with stg as (
 ),
 
 dim_passenger as (
-    select * from {{ ref('dim_passenger') }}
+    select * from {{ ref('dim_passenger') }} where dbt_valid_to is null
 ),
 
 dim_aircraft as (
-    select aircraft_id, aircraft_key from {{ ref('dim_aircraft') }}
+    select aircraft_id, aircraft_key from {{ ref('dim_aircraft') }} where dbt_valid_to is null
 ),
 
 dim_airport as (
-    select airport_key, airport_name from {{ ref('dim_airport') }}
+    select airport_key, airport_name from {{ ref('dim_airport') }} where dbt_valid_to is null
 ),
 
 fact as (
     select
         {{ dbt_utils.generate_surrogate_key([
             's.flight_id', 
+            's.travel_date',
             's.itinerary_no', 
             's.ticket_no'
         ]) }} as flight_key,
 
         -- foreign keys
         dp.passenger_key,
+        {{ dbt_utils.generate_surrogate_key(['s.origin_airport', 's.destination_airport']) }} as route_key,
         da.aircraft_key,
         dap_orig.airport_key as origin_airport_key,
         dap_dest.airport_key as destination_airport_key,
@@ -90,7 +91,5 @@ fact as (
 )
 
 select * from fact
-{{ log('is_incremental ' ~ var(is_incremental(), 'not incremental')) }}
-{% if is_incremental() %}
-where travel_date >= (select max(travel_date) from {{ this }})
-{% endif %}
+-- The source has no ingestion timestamp: merge all source keys to include
+-- late arrivals and corrections to older travel dates.

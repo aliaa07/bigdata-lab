@@ -2,7 +2,7 @@
 
 {{
     config(
-        target_schema='warehouse',
+        target_schema=target.schema,
         unique_key='aircraft_key',
         strategy='check',
         file_format='delta',
@@ -18,7 +18,7 @@ with ranked as (
         airplane_model,
         row_number() over (
             partition by aircraft_id
-            order by travel_date desc
+            order by travel_date desc, flight_id desc, itinerary_no desc, ticket_no desc
         ) as rn
     from {{ ref('stg_flight') }}
 )
