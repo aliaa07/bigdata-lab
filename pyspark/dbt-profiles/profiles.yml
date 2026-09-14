@@ -8,6 +8,9 @@ flight_data:
       threads: 2
       type: spark
       server_side_parameters:
+        # Thrift requires set:hiveconf: to apply this to the Spark SQL session.
+        # Snapshot updates can nest the same ephemeral CTE more than once.
+        "set:hiveconf:spark.sql.legacy.ctePrecedencePolicy": "CORRECTED"
         "spark.databricks.delta.optimizeMetadataQuery.enabled": "false"
   target: dev
 
@@ -25,5 +28,6 @@ spark_lab:
       type: spark
       user: jovyan
       server_side_parameters:
+        "set:hiveconf:spark.sql.legacy.ctePrecedencePolicy": "CORRECTED"
         "spark.databricks.delta.optimizeMetadataQuery.enabled": "false"
   target: dev

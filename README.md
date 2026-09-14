@@ -175,6 +175,19 @@ Currency and some source units are undocumented. Spellings such as `turbulance` 
 
 Open JupyterLab and work in `/home/jovyan/workspace`. The host directory `pyspark/jupyter` is mounted at `/home/jovyan`; the root `data` directory is not automatically mounted.
 
+On Linux, match the notebook user to the checkout owner before starting services:
+
+```bash
+export JUPYTER_UID=$(id -u)
+export JUPYTER_GID=$(id -g)
+make up
+```
+
+CI sets these automatically. The image's startup script adjusts mounted-home
+ownership, then starts Jupyter as `jovyan`, using the configured UID/GID.
+This prevents an unwritable `/home/jovyan/.local` on Linux checkouts. Defaults
+are UID 1000 and GID 100. See [Jupyter's ownership options](https://jupyter-docker-stacks.readthedocs.io/en/latest/using/common.html#permission-specific-configurations).
+
 Stage the headerless sample at the HDFS path the notebook expects:
 
 ```bash
@@ -245,7 +258,7 @@ Target behavior:
 - Composite targets invoke each child Make sequentially, including under `make -j`; avoid launching separate pipeline commands concurrently.
 - `make dbt-clean` removes `target` and `dbt_packages`, including generated docs and validation artifacts. Run `dbt deps` again afterward.
 
-[GitHub Actions](.github/workflows/main.yml) runs on pushes and pull requests to `main`. It checks startup safeguards, builds images, initializes isolated storage, runs dbt steps, generates docs, and tears down. The local Docker run does not validate a hosted Actions runner; size runner memory for the stack. Test logs and docs are not uploaded as CI artifacts.
+[GitHub Actions](.github/workflows/main.yml) runs on pushes and pull requests to `main`. It checks startup safeguards and Linux notebook permissions, builds images, initializes isolated storage, runs dbt steps, generates docs, and tears down. The local Docker run does not validate a hosted Actions runner; size runner memory for the stack. Failures upload container logs and Jupyter's health state as the `ci-diagnostics` artifact before teardown. The two stacks retain separate Compose project names, avoiding false orphan warnings.
 
 ## Validation and troubleshooting
 
@@ -269,6 +282,7 @@ Flight times are treated as a shared clock, with arrival on the next day when it
 | Thrift restarts or is killed | Check Docker/WSL memory and YARN executor logs; the driver has a 1 GiB heap inside a 2 GiB container |
 | Notebook import/JVM errors | Compare Python PySpark/Delta versions with the JVM libraries |
 | dbt cannot connect | Check Thrift health, YARN nodes, and `dbt debug` |
+| `AMBIGUOUS_ALIAS_IN_NESTED_CTE` during snapshot updates | dbt sessions must use `spark.sql.legacy.ctePrecedencePolicy=CORRECTED`, configured in `pyspark/dbt-profiles/profiles.yml`; this lets inner ephemeral CTEs take precedence |
 | dbt tables missing | Run seed and snapshots in order; verify `warehouse` and the profile |
 | No dbt project file found | Use `exec dbt dbt ...`; project directory is `/usr/app/dbt/flight_data` |
 | Port unavailable | Check for other local stacks using the published ports |
@@ -286,6 +300,7 @@ Startup regression checks (Python 3, Bash, GNU Make, and Docker CLI required):
 
 ```bash
 python hadoop/tests/test_startup.py
+python pyspark/tests/test_notebook_startup.py
 docker run --rm --network none --hostname localhost --memory 1g --cpus 1 \
   -v "$PWD/hadoop:/review:ro" \
   -v "$PWD/hadoop/hadoop-conf:/opt/hadoop/etc/hadoop:ro" \

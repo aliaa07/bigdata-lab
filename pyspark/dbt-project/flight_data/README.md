@@ -2,6 +2,12 @@
 
 Spark SQL models for flight, route, aircraft and passenger analytics, using Delta Lake and Spark Thrift. The active profile is `flight_data`, target `dev`, schema `warehouse`.
 
+The profile sets `spark.sql.legacy.ctePrecedencePolicy=CORRECTED` for each dbt
+connection using the Thrift `set:hiveconf:` parameter prefix. Snapshot updates
+can repeat ephemeral CTE names in nested queries;
+inner definitions must take precedence. The `nested_cte_precedence` test verifies
+this session setting, and the live regression verifies repeated snapshots.
+
 See the [repository README](../../../README.md) for setup, service access, resource planning, and persistence. `make pipeline` runs the complete sample workflow using an already running stack; `make rebuild` starts the stack first and uses existing images.
 
 ## Input and dependency order

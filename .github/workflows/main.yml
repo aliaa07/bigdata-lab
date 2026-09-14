@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      COMPOSE_PROJECT_NAME: bigdata-ci
+      # Keep the hadoop and pyspark Compose projects distinct.
       BIGDATA_VOLUME_PREFIX: bigdata-ci-${{ github.run_id }}-${{ github.run_attempt }}
 
     # Hadoop + Spark need significant resources
@@ -31,6 +31,14 @@ jobs:
 
       - name: Build custom images
         run: make build
+
+      - name: Match Jupyter to checkout ownership
+        run: |
+          echo "JUPYTER_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "JUPYTER_GID=$(id -g)" >> "$GITHUB_ENV"
+
+      - name: Check Jupyter startup with Linux permissions
+        run: python3 pyspark/tests/test_notebook_startup.py
 
       - name: Start Hadoop stack
         run: make ci-up
@@ -64,6 +72,22 @@ jobs:
 
       - name: dbt cleanup
         run: make dbt-clean
+
+      - name: Capture failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p ci-diagnostics
+          docker ps -a > ci-diagnostics/containers.txt
+          docker compose -f hadoop/docker-compose.yaml logs --no-color --tail=200 > ci-diagnostics/hadoop.log 2>&1
+          docker compose -f pyspark/docker-compose.yaml logs --no-color --tail=200 > ci-diagnostics/analytics.log 2>&1
+          docker inspect --format '{{json .State}}' jupyterlab > ci-diagnostics/jupyter-state.json 2>&1 || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics
+          path: ci-diagnostics/
 
       - name: Cleanup
         if: always()
