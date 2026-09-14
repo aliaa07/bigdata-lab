@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 60
     env:
       COMPOSE_PROJECT_NAME: bigdata-ci
+      BIGDATA_VOLUME_PREFIX: bigdata-ci-${{ github.run_id }}-${{ github.run_attempt }}
 
     # Hadoop + Spark need significant resources
     # GitHub hosted runners have 7GB RAM - may be tight
@@ -24,6 +25,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Check startup safeguards
+        run: python3 hadoop/tests/test_startup.py
 
       - name: Build custom images
         run: make build

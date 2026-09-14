@@ -23,6 +23,23 @@ services:
       - ./hadoop-conf:/opt/hadoop/etc/hadoop
       - namenode_storage:/tmp/hadoop-hadoop/dfs/name
 
+  # Explicit first-install action; never included in ordinary compose up.
+  namenode-format:
+    image: apache/hadoop:3.5.0
+    profiles: ["init"]
+    restart: "no"
+    command: ["bash", "/opt/hadoop/scripts/init-namenode.sh"]
+    depends_on:
+      namenode-init:
+        condition: service_completed_successfully
+    networks:
+      - bigdata
+    volumes:
+      - ./hadoop-conf:/opt/hadoop/etc/hadoop:ro
+      - ./scripts:/opt/hadoop/scripts:ro
+      - namenode_storage:/tmp/hadoop-hadoop/dfs/name
+      - datanode1_storage:/tmp/hadoop-hadoop/dfs/data:ro
+
   namenode:
     image: apache/hadoop:3.5.0
     container_name: namenode
@@ -200,8 +217,8 @@ networks:
 
 volumes:
   namenode_storage:
-    name: bigdata_namenode_storage
+    name: ${BIGDATA_VOLUME_PREFIX:-bigdata}_namenode_storage
   datanode1_storage:
-    name: bigdata_datanode1_storage
+    name: ${BIGDATA_VOLUME_PREFIX:-bigdata}_datanode1_storage
 #  datanode2_storage:
 #    name: bigdata_datanode2_storage

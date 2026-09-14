@@ -266,4 +266,4 @@ networks:
 
 volumes:
   metastore_db:
-    name: bigdata_metastore_db
+    name: ${BIGDATA_VOLUME_PREFIX:-bigdata}_metastore_db

@@ -4,7 +4,7 @@
 # ============================================================
 
 .PHONY: help \
-	init up ci-up normal-up down build \
+	network init up ci-up normal-up down build \
 	dbt-deps dbt-seed \
 	dbt-run dbt-run-staging dbt-run-core dbt-run-marts dbt-run-snapshots \
 	dbt-test dbt-docs dbt-docs-generate dbt-clean \
@@ -26,7 +26,7 @@ help:
 	@echo ""
 	@echo "Docker:"
 	@echo "  build              - Build custom Docker images"
-	@echo "  init               - Initialize HDFS NameNode"
+	@echo "  init               - Initialize empty HDFS storage (Hadoop must be stopped)"
 	@echo "  up                 - Start Hadoop and PySpark"
 	@echo "  down               - Stop all Docker stacks"
 	@echo ""
@@ -67,36 +67,29 @@ build:
 # Docker orchestration
 # ============================================================
 
+network:
+	docker network inspect bigdata >/dev/null 2>&1 || docker network create bigdata
+
+init: network
+	@states=$$(docker compose -f "$(HADOOP_DIR)/docker-compose.yaml" ps --all --format '{{.State}}' namenode datanode1) || exit $$?; \
+	for state in $$states; do \
+		case "$$state" in \
+			created|exited) ;; \
+			*) echo "Stop the Hadoop stack before running make init (state: $$state)." >&2; exit 1 ;; \
+		esac; \
+	done
+	docker compose -f "$(HADOOP_DIR)/docker-compose.yaml" run --rm namenode-format
+
+# CI initializes its isolated volumes before starting any Hadoop daemons.
+# Re-enter the absolute directory for each child make (WSL can lose its cwd).
 ci-up:
-	@echo "Initializing bigdata network..."
-	docker network create bigdata 2>/dev/null || true
+	$(MAKE) -C "$(CURDIR)" init
+	$(MAKE) -C "$(CURDIR)" up
 
-	@echo "Starting Hadoop..."
-	cd $(HADOOP_DIR) && docker compose up -d
+normal-up: up
 
-	@echo "Formatting HDFS NameNode..."
-	cd $(HADOOP_DIR) && docker compose run --rm namenode hdfs namenode -format -force
-
-	@echo "Waiting for HDFS NameNode to be healthy..."
-	@until (cd $(HADOOP_DIR) && docker compose exec -T namenode hdfs dfsadmin -report >/dev/null 2>&1); do \
-		echo "  ...still waiting on HDFS"; \
-		sleep 3; \
-	done
-	@echo "HDFS NameNode initialization completed."
-
-	@echo "Starting PySpark..."
-	cd $(PYSPARK_DIR) && docker compose up -d
-
-	@echo "Waiting for Spark Thrift Server to accept connections..."
-	@until (cd $(PYSPARK_DIR) && docker compose exec -T spark-thrift bash -c "echo > /dev/tcp/localhost/10000" >/dev/null 2>&1); do \
-		echo "  ...still waiting on Thrift Server"; \
-		sleep 3; \
-	done
-
-	@echo "Big Data stack is ready."
-
-normal-up:
-	#docker network create bigdata 2>/dev/null || true
+# Routine startup never formats storage. Run make init once on a new install.
+up: network
 
 	@echo "Starting Hadoop..."
 	cd $(HADOOP_DIR) && docker compose up -d
@@ -176,7 +169,7 @@ dbt-clean:
 # Full pipeline
 # ============================================================
 
-all: build ci-up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
+all: build up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
 	@echo ""
 	@echo "========================================="
 	@echo " Full Big Data pipeline completed"
@@ -186,7 +179,7 @@ all: build ci-up dbt-deps dbt-seed dbt-run-snapshots dbt-run dbt-test dbt-clean
 # Quick rebuild and test
 # ============================================================
 
-rebuild: build init up dbt-clean dbt-deps dbt-seed dbt-run dbt-test
+rebuild: build up dbt-clean dbt-deps dbt-seed dbt-run dbt-test
 	@echo ""
 	@echo "========================================="
 	@echo " Rebuild and test completed"
