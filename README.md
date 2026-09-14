@@ -361,7 +361,3 @@ Notebooks, dbt source, installed dbt packages, and generated dbt outputs are hos
 ├── PROJECT_REVIEW.md
 └── README.md
 ```
-
-## Scope and remaining work
-
-The repeatable sample workflow is `make pipeline`. The separate notebook workflows and utility defects recorded in [PROJECT_REVIEW.md](PROJECT_REVIEW.md) remain outside that workflow. Hosted GitHub Actions and rebuilt images require their own validation. Dataset provenance, currency/units, and a repository license still need project-owner input.
